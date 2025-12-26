@@ -1,0 +1,19 @@
+name: dpfedmeta-1x-cu117
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pytorch=1.13.1
+  - torchvision=0.14.1
+  - pytorch-cuda=11.7
+  - numpy=1.21
+  - scipy
+  - pillow
+  - absl-py
+  - tqdm
+  - pip
+  - pip:
+      - torchsummary==1.5.1

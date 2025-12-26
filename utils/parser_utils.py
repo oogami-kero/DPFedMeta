@@ -47,6 +47,12 @@ def get_args():
     parser.add_argument('--noise_multiplier', type=float, default=1.0)
     parser.add_argument('--lot_size', type=int, default=8)
     parser.add_argument('--clip_percentile', type=int, default=50)
+    parser.add_argument('--solve_noise_for_eps', type=str, default="False",
+                        help='If true, solve for noise multiplier to hit eps_target at full step budget.')
+    parser.add_argument('--noise_search_sigma_min', type=float, default=1e-3,
+                        help='Lower bound for noise search when solving for eps.')
+    parser.add_argument('--noise_search_sigma_max', type=float, default=10.0,
+                        help='Upper bound for noise search when solving for eps.')
 
     parser.add_argument('--norm_layer', type=str, default="batch_norm")
     parser.add_argument('--max_pooling', type=str, default="False")
@@ -119,7 +125,6 @@ def extract_args_from_json(json_file_path, args_dict):
             args_dict[key] = summary_dict[key]
 
     return args_dict
-
 
 
 

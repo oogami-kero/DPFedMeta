@@ -78,7 +78,8 @@ def augment_image(image, k, channels, augment_bool, args, dataset_name):
 
 
 def get_transforms_for_dataset(dataset_name, args, k):
-    if "cifar_10" in dataset_name or "cifar_100" in dataset_name:
+    dataset_name_lower = dataset_name.lower()
+    if "cifar_10" in dataset_name_lower or "cifar_100" in dataset_name_lower or "fc100" in dataset_name_lower:
         transform_train = [transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
@@ -90,12 +91,12 @@ def get_transforms_for_dataset(dataset_name, args, k):
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
         ])]
 
-    elif 'omniglot' in dataset_name:
+    elif 'omniglot' in dataset_name_lower:
 
         transform_train = [rotate_image(k=k, channels=args.image_channels), transforms.ToTensor()]
         transform_evaluate = [transforms.ToTensor()]
 
-    elif 'imagenet' in dataset_name:
+    elif 'imagenet' in dataset_name_lower:
 
         transform_train = [transforms.Compose([
 
@@ -639,4 +640,3 @@ class MetaLearningSystemDataLoader(object):
         self.dataset.set_augmentation(augment_images=augment_images)
         for sample_id, sample_batched in enumerate(self.get_dataloader(self.dataset)):
             yield sample_batched
-

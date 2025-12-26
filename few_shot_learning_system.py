@@ -72,6 +72,7 @@ class MAMLFewShotClassifier(nn.Module):
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer=self.optimizer, T_max=self.args.total_epochs,
                                                               eta_min=self.args.min_learning_rate)
         self.dp = False
+        self.clip_norm_log_interval = int(getattr(self.args, "clip_norm_log_interval", 0))
 
     def get_per_step_loss_importance_vector(self):
         """
@@ -301,8 +302,6 @@ class MAMLFewShotClassifier(nn.Module):
             for name, param in self.classifier.named_parameters():
                 if param.requires_grad:
                     param.grad.data.clamp_(-10, 10)  # not sure if this is necessary, more experiments are needed
-        #print('grad_norm',self.grad_norm())
-        self.save_clip_norms(self.grad_norm())
         self.optimizer.step()
 
     def grad_norm(self):
@@ -350,6 +349,8 @@ class MAMLFewShotClassifier(nn.Module):
         losses, per_task_target_preds = self.train_forward_prop(data_batch=data_batch, epoch=epoch)
 
         self.meta_update(loss=losses['loss'])
+        if self.clip_norm_log_interval > 0 and (iter_n % self.clip_norm_log_interval == 0):
+            self.save_clip_norms(self.grad_norm())
         losses['learning_rate'] = self.scheduler.get_lr()[0]
         self.optimizer.zero_grad()
         self.zero_grad()

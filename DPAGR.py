@@ -16,6 +16,7 @@ model = MAMLFewShotClassifier(args=args, device=device,im_shape=(2, args.image_c
                                   args.image_height, args.image_width))
 
 maml_system = ExperimentBuilder(model=model, data=data, args=args, device=device, example_level=False)
-maml_system.run_rdp_compute(eps_target=1.5)
+eps_target = getattr(args, 'eps_target', 1.5)
+maml_system.run_rdp_compute(eps_target=eps_target)
 maml_system.run_experiment()
 maml_system.run_experiment_test_only()

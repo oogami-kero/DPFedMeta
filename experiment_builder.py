@@ -412,25 +412,87 @@ class ExperimentBuilder(object):
                   list(range(5, 64)) + [128, 256, 512])
         tasks_per_step = self.model.lot_size * self.args.batch_size
         q = tasks_per_step / N  # q - the sampling ratio.
+        delta = getattr(self.args, 'delta', 1e-6)
+        solve_noise = getattr(self.args, 'solve_noise_for_eps', False)
+        sigma_min = getattr(self.args, 'noise_search_sigma_min', 1e-3)
+        sigma_max = getattr(self.args, 'noise_search_sigma_max', 10.0)
+
+        def compute_eps_for_sigma(sigma, steps):
+            rdp = compute_rdp(q, sigma, steps, orders)
+            eps, _, opt_order = get_privacy_spent(orders, rdp, target_delta=delta)
+            return eps, opt_order
+
+        steps_high_bound = int(N / tasks_per_step)
         z = self.model.noise_multiplier
-        steps_low_bound = 0
-        steps_high_bound = int(N/tasks_per_step)
-        steps = 1
+        dp_info = None
 
-        # The following code is a binary search algorithm, find the steps that does not violate the target epsilon
-        while steps_high_bound - steps_low_bound > 1:
-            steps = int((steps_low_bound + steps_high_bound) / 2)
-            dp_info = apply_dp_sgd_analysis(q, z, steps, orders, 1e-6)
-            eps = dp_info['eps']
-            if eps > eps_target:
-                steps_high_bound = steps
+        if solve_noise:
+            # Keep full training steps, solve for noise that meets the target eps.
+            steps = steps_high_bound
+            eps_lo, _ = compute_eps_for_sigma(sigma_min, steps)
+            eps_hi, _ = compute_eps_for_sigma(max(sigma_max, z), steps)
+
+            # Increase sigma_max if target requires smaller epsilon than current high bound.
+            expand_iter = 0
+            while eps_hi > eps_target and expand_iter < 50:
+                sigma_max *= 2
+                eps_hi, _ = compute_eps_for_sigma(sigma_max, steps)
+                expand_iter += 1
+
+            # Decrease sigma_min if target requires larger epsilon than current low bound.
+            expand_iter = 0
+            while eps_lo < eps_target and sigma_min > 1e-12 and expand_iter < 50:
+                sigma_min /= 2
+                eps_lo, _ = compute_eps_for_sigma(sigma_min, steps)
+                expand_iter += 1
+
+            if not (eps_hi <= eps_target <= eps_lo):
+                # Target is unattainable within searched noise range; fall back to using sigma=z and report.
+                final_sigma = z
+                eps_final, _ = compute_eps_for_sigma(final_sigma, steps)
+                print("Warning: solve_noise_for_eps could not bracket target eps. "
+                      "Using existing noise multiplier {} giving eps {:.4f}".format(final_sigma, eps_final))
             else:
-                steps_low_bound = steps
+                sigma_low = sigma_min
+                sigma_high = max(sigma_max, z)
+                for _ in range(60):
+                    sigma_mid = (sigma_low + sigma_high) / 2.0
+                    eps_mid, _ = compute_eps_for_sigma(sigma_mid, steps)
+                    if eps_mid > eps_target:
+                        sigma_low = sigma_mid
+                    else:
+                        sigma_high = sigma_mid
+                final_sigma = sigma_high
+                eps_final, _ = compute_eps_for_sigma(final_sigma, steps)
 
-        N_train = steps * tasks_per_step
-        if N_train > N:
-            N_train = N
-        self.iteration_constrained = N_train / self.args.batch_size
+            # Update model noise multiplier to the solved value.
+            self.model.noise_multiplier = final_sigma
+            self.model.args.noise_multiplier = final_sigma
+            dp_info = apply_dp_sgd_analysis(q, final_sigma, steps, orders, delta)
+        else:
+            steps_low_bound = 0
+            steps = 1
+            # Binary search to find steps that do not violate target epsilon.
+            while steps_high_bound - steps_low_bound > 1:
+                steps = int((steps_low_bound + steps_high_bound) / 2)
+                dp_info = apply_dp_sgd_analysis(q, z, steps, orders, delta)
+                eps = dp_info['eps']
+                if eps > eps_target:
+                    steps_high_bound = steps
+                else:
+                    steps_low_bound = steps
+            # Ensure dp_info reflects the chosen steps.
+            dp_info = apply_dp_sgd_analysis(q, z, steps, orders, delta)
+
+            N_train = steps * tasks_per_step
+            if N_train > N:
+                N_train = N
+            self.iteration_constrained = N_train / self.args.batch_size
+
+        # If we solved noise, steps is set to the full budget; for the step-search path, steps/N_train already set.
+        if solve_noise:
+            N_train = steps_high_bound * tasks_per_step
+            self.iteration_constrained = N_train / self.args.batch_size
 
         hyper_impact_dp = dict()
         hyper_impact_dp['lot size'] = self.model.lot_size
@@ -438,6 +500,8 @@ class ExperimentBuilder(object):
         hyper_impact_dp['epoch'] = N / (self.args.total_iter_per_epoch * self.args.batch_size)
         hyper_impact_dp['tasks'] = N
         hyper_impact_dp['clip_percentile'] = self.model.clip_percentile
+        hyper_impact_dp['noise_multiplier'] = self.model.noise_multiplier
+        hyper_impact_dp['solve_noise_for_eps'] = solve_noise
         save_to_json(filename=os.path.join(self.logs_filepath, "privacy parameters.json"),
                      dict_to_store=[dp_info, hyper_impact_dp])
 
